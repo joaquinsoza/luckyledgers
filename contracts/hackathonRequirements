@@ -1,0 +1,731 @@
+# Hackathon MVP Requirements (SIMPLIFIED - Chainlink-Inspired)
+
+## Architecture Overview
+
+**2 Contracts (Factory removed for simplicity!):**
+1. **Raffle** - **Auto-restarting multi-round** raffle (one deployment, infinite rounds!)
+2. **MockVRF** - Simulates VRF oracle with request/fulfill pattern
+
+**Key Design Decisions (Simplified from Chainlink Analysis):**
+- ✅ **Auto-restart multi-rounds** = VRF callback auto-starts next round (infinite raffle!)
+- ✅ **Participation-based** = Draw triggers when target # of players reached (no time complexity)
+- ✅ VRF request/fulfill callback pattern = production-ready architecture
+- ✅ Fully permissionless (anyone can enter, fulfill VRF)
+- ✅ XLM-only for MVP (no LUCKY token yet)
+- ✅ No protocol fees yet (100% prize to winner)
+- ✅ **Race condition prevention** = `picking_winner` flag (critical!)
+- ✅ **Re-entrancy safe** = CEI pattern (Checks-Effects-Interactions)
+- ✅ **Winners can claim anytime** = Store all historical winners with claim status
+- ❌ **NO refund mechanism** = Keeps it simple, raffle waits until filled
+- ❌ **NO time constraints** = Pure participation model
+- ❌ **NO Factory contract** = Direct deployment for hackathon (one raffle, many rounds!)
+
+---
+
+## Contract 1: Raffle (Auto-Restarting Multi-Round)
+
+### Constructor
+```rust
+pub fn __constructor(
+    e: Env,
+    owner: Address,              // For admin functions only
+    vrf_contract: Address,       // MockVRF address
+    xlm_token: Address,          // Native XLM SAC address
+    ticket_price: i128,          // e.g., 5_000_000 = 0.5 XLM
+    target_participants: u32     // e.g., 10 players triggers draw
+)
+```
+**Initial State:**
+- Sets `current_round = 0`
+- Sets `state = OPEN`
+- Sets `picking_winner = false`
+- Initializes empty storage for round 0
+
+### Entry Management
+```rust
+pub fn enter(e: Env, player: Address, num_tickets: u32) -> u32
+```
+**Validations:**
+- Requires `state == OPEN`
+- Requires `msg.value == ticket_price * num_tickets` (exact amount)
+- Requires `total_tickets + num_tickets <= target_participants * MAX_TICKETS_PER_PLAYER` (prevent one player buying all)
+- Requires `!picking_winner` (critical race condition check!)
+
+**Logic:**
+- Transfer `num_tickets * ticket_price` XLM from player to contract
+- For each ticket: `tickets[next_ticket_id] = player`
+- Increment `total_tickets` by `num_tickets`
+- Add player to `participants` list if first entry
+- Increment `prize_pool` by transferred amount
+- **Check if ready to draw**: If `participants.len() >= target_participants`, emit `ReadyToDraw` event
+
+**Returns:** Total tickets owned by player
+
+### Drawing (VRF Request/Fulfill Pattern)
+
+```rust
+pub fn request_draw(e: Env, caller: Address) -> u64
+```
+**Validations:**
+- Requires `state == OPEN`
+- Requires `participants.len() >= target_participants`
+- Requires `!picking_winner` (prevent double-draws!)
+
+**Logic:**
+- Set `picking_winner = true` (CRITICAL: prevents race conditions)
+- Call `vrf_contract.request_random(contract_address, raffle_id)`
+- Store returned `vrf_request_id`
+- Transition state to `DRAWING`
+- Emit `DrawRequested` event
+- Return `vrf_request_id`
+
+**Note:** This can serve as manual override if automated keeper fails
+
+```rust
+pub fn fulfill_random(e: Env, vrf: Address, random_value: u64)
+```
+**Validations:**
+- **CRITICAL:** Requires `vrf == config.vrf_contract` (only VRF can callback!)
+- Requires `state == DRAWING`
+- Requires `picking_winner == true`
+
+**Logic:**
+- Calculate `winning_ticket_id = (random_value % total_tickets) as u32`
+- Lookup `winner = tickets[current_round][winning_ticket_id]`
+- Store winner in permanent record:
+  ```rust
+  WinnerRecord {
+      winner: Address,
+      round: u64,           // current_round
+      amount: i128,         // prize_pool for this round
+      claimed: bool,        // false initially
+  }
+  ```
+- Emit `WinnerSelected(winner, current_round, prize_amount)` event
+- **AUTO-RESTART NEXT ROUND:**
+  - Increment `current_round`
+  - Clear current round's tickets storage
+  - Reset `total_tickets = 0`, `total_participants = 0`, `prize_pool = 0`
+  - Set `state = OPEN`
+  - Set `picking_winner = false`
+  - Emit `RoundStarted(new_round_id)` event
+- **Winner can claim their prize anytime later!**
+
+### Payout (CEI Pattern for Re-entrancy Safety!)
+
+```rust
+pub fn claim_prize(e: Env, claimer: Address, round: u64) -> i128
+```
+**Validations:**
+- Requires `round < current_round` (can't claim current ongoing round)
+- Requires winner record exists for (claimer, round)
+- Requires `claimer == winner_record.winner` (only winner can claim)
+- Requires `!winner_record.claimed` (can't claim twice)
+- `claimer.require_auth()`
+
+**Logic (Checks-Effects-Interactions Pattern!):**
+1. **Checks:** Validate all requirements above
+2. **Effects:**
+   - Load `winner_record` from storage
+   - Store `prize_amount` in local var
+   - Update record: `winner_record.claimed = true`
+   - Save updated record back to storage
+3. **Interactions:**
+   - Transfer `prize_amount` XLM to winner
+   - Emit `PrizeClaimed(winner, round, prize_amount)` event
+4. **Return:** prize_amount
+
+**Why CEI?** If winner is a malicious contract, they can't re-enter because `claimed = true` is set BEFORE transfer
+
+```rust
+pub fn claim_all_prizes(e: Env, claimer: Address) -> i128
+```
+**Helper function** - Claims all unclaimed prizes for a user across all rounds
+- Iterates through winner records for claimer
+- Claims each unclaimed prize using CEI pattern
+- Returns total amount claimed
+
+### Admin Functions (Emergency Only)
+
+```rust
+pub fn cancel_raffle(e: Env, owner: Address)
+```
+- Only owner can call
+- Only if `state == OPEN` and stuck (no progress for X time)
+- Enables refunds by setting `state = CANCELED`
+
+```rust
+pub fn claim_refund(e: Env, participant: Address) -> i128
+```
+- Only if `state == CANCELED`
+- Refund = `ticket_count * ticket_price`
+- Mark participant as refunded
+
+### View Functions
+```rust
+pub fn get_current_round(e: Env) -> u64
+pub fn get_round_state(e: Env) -> RaffleInfo  // Current round info
+pub fn get_my_tickets(e: Env, round: u64, player: Address) -> u32
+pub fn get_participants(e: Env, round: u64) -> Vec<Address>
+pub fn get_config(e: Env) -> RaffleConfig
+pub fn is_ready_to_draw(e: Env) -> bool  // Helper for frontend
+
+// Winner/Prize queries
+pub fn get_winner(e: Env, round: u64) -> Option<WinnerRecord>
+pub fn get_my_unclaimed_prizes(e: Env, user: Address) -> Vec<WinnerRecord>
+pub fn get_all_winners(e: Env) -> Vec<WinnerRecord>  // Historical winners
+```
+
+### Data Types
+
+```rust
+#[derive(Clone)]
+#[contracttype]
+pub enum RaffleState {
+    Open = 0,       // Accepting entries for current round
+    Drawing = 1,    // VRF requested, waiting for callback
+    Canceled = 2,   // Admin canceled, refunds enabled (emergency only)
+}
+
+#[derive(Clone)]
+#[contracttype]
+pub struct RaffleInfo {
+    pub current_round: u64,
+    pub state: RaffleState,
+    pub total_tickets: u32,
+    pub total_participants: u32,
+    pub prize_pool: i128,
+    pub picking_winner: bool,      // Race condition guard!
+    pub target_participants: u32,
+    pub vrf_request_id: Option<u64>,
+}
+
+#[derive(Clone)]
+#[contracttype]
+pub struct RaffleConfig {
+    pub owner: Address,
+    pub vrf_contract: Address,
+    pub xlm_token: Address,
+    pub ticket_price: i128,
+    pub target_participants: u32,
+}
+
+#[derive(Clone)]
+#[contracttype]
+pub struct WinnerRecord {
+    pub winner: Address,
+    pub round: u64,
+    pub amount: i128,
+    pub claimed: bool,
+}
+```
+
+### Storage Structure (Multi-Round but Simple!)
+
+```rust
+// Config (persistent, never changes)
+const CONFIG: Symbol = symbol_short!("CONFIG");
+RaffleConfig
+
+// Current round tracking
+const CURRENT_ROUND: Symbol = symbol_short!("CROUND");
+u64
+
+// State (persistent, resets each round)
+const STATE: Symbol = symbol_short!("STATE");
+RaffleState
+
+const PICKING: Symbol = symbol_short!("PICKING");  // picking_winner flag
+bool
+
+// Current round data (gets cleared on round restart)
+const TOTAL_TICKETS: Symbol = symbol_short!("TOTAL");
+u32
+
+const TOTAL_PARTICIPANTS: Symbol = symbol_short!("TPART");
+u32
+
+const PRIZE_POOL: Symbol = symbol_short!("POOL");
+i128
+
+// Per-round tickets: Map<(round, ticket_id), Address>
+const TICKETS: Symbol = symbol_short!("TICKETS");
+Map<(u64, u32), Address>
+
+// Per-round player counts: Map<(round, player), u32>
+const PLAYER_TICKETS: Symbol = symbol_short!("PTIX");
+Map<(u64, Address), u32>
+
+// Per-round participants: Map<(round, participant_idx), Address>
+const PARTICIPANTS: Symbol = symbol_short!("PARTS");
+Map<(u64, u32), Address>
+
+// Winner records: Map<(round, winner), WinnerRecord>
+// OR Vec<WinnerRecord> indexed by round
+const WINNERS: Symbol = symbol_short!("WINNERS");
+Map<u64, WinnerRecord>
+
+// User's winning rounds: Map<Address, Vec<u64>>
+// Helps with get_my_unclaimed_prizes query
+const USER_WINS: Symbol = symbol_short!("UWINS");
+Map<Address, Vec<u64>>
+```
+
+### Events
+
+```rust
+// Emitted when someone enters
+#[contractevent]
+pub fn player_entered(round: u64, player: Address, num_tickets: u32, total_tickets: u32);
+
+// Emitted when target reached
+#[contractevent]
+pub fn ready_to_draw(round: u64, total_participants: u32);
+
+// Emitted when draw requested
+#[contractevent]
+pub fn draw_requested(round: u64, vrf_request_id: u64);
+
+// Emitted when winner selected
+#[contractevent]
+pub fn winner_selected(round: u64, winner: Address, prize_amount: i128);
+
+// Emitted when new round starts (auto-restart!)
+#[contractevent]
+pub fn round_started(round: u64);
+
+// Emitted when prize claimed
+#[contractevent]
+pub fn prize_claimed(round: u64, winner: Address, prize_amount: i128);
+```
+
+### Critical Implementation Notes (From Chainlink Analysis)
+
+#### 1. Race Condition Prevention
+```rust
+// In request_draw():
+if picking_winner {
+    panic_with_error!(&e, Error::DrawInProgress);
+}
+picking_winner = true;  // Set BEFORE making VRF call!
+
+// In claim_prize():
+picking_winner = false;  // Release lock after completion
+```
+
+#### 2. Re-entrancy Protection (CEI Pattern)
+```rust
+pub fn claim_prize(e: Env, claimer: Address) -> i128 {
+    // CHECKS
+    let winner = get_winner(&e).unwrap();
+    if claimer != winner {
+        panic_with_error!(&e, Error::NotWinner);
+    }
+
+    // EFFECTS (update state BEFORE external calls!)
+    let prize = get_prize_pool(&e);
+    set_state(&e, RaffleState::Completed);
+    set_picking_winner(&e, false);
+
+    // INTERACTIONS (external calls LAST!)
+    token::Client::new(&e, &get_xlm_token(&e))
+        .transfer(&e.current_contract_address(), &winner, &prize);
+
+    events::emit_prize_claimed(&e, winner, prize);
+
+    prize
+}
+```
+
+#### 3. VRF Callback Security
+```rust
+pub fn fulfill_random(e: Env, vrf: Address, random_value: u64) {
+    // CRITICAL: Verify caller is VRF contract!
+    let config = storage::get_config(&e);
+    if vrf != config.vrf_contract {
+        panic_with_error!(&e, Error::UnauthorizedVRF);
+    }
+
+    // Only VRF can call this function
+    // No require_auth() needed because we check address
+}
+```
+
+---
+
+## Contract 2: MockVRF (Simplified)
+
+### Constructor
+```rust
+pub fn __constructor(e: Env)
+```
+- No admin, fully permissionless
+- Initialize request counter to 0
+
+### Request Randomness
+
+```rust
+pub fn request_random(
+    e: Env,
+    requester: Address,   // Raffle contract address
+) -> u64
+```
+**Logic:**
+- Increment `request_counter`
+- Store `VRFRequest { requester, timestamp, fulfilled: false, random_value: None }`
+- Emit `RandomnessRequested(request_id, requester)` event
+- Return `request_id`
+
+**Note:** No separate `request_id` param - we use global counter
+
+### Fulfill Randomness
+
+```rust
+pub fn fulfill_random(
+    e: Env,
+    fulfiller: Address,  // Anyone can fulfill (keeper or manual)
+    request_id: u64
+) -> u64
+```
+**Logic:**
+- Load `request` from storage
+- Require `!request.fulfilled`
+- Generate `random_value = env.prng().gen::<u64>()`
+- Update request: `fulfilled = true`, store `random_value`
+- **Callback to requester:**
+  ```rust
+  let raffle = RaffleClient::new(&e, &request.requester);
+  raffle.fulfill_random(&e.current_contract_address(), &random_value);
+  ```
+- Emit `RandomnessFulfilled(request_id, random_value)` event
+- Return `random_value`
+
+**Note:** Anyone can call this (permissionless keeper model)
+
+### View Functions
+
+```rust
+pub fn get_request(e: Env, request_id: u64) -> VRFRequest
+pub fn get_latest_request_id(e: Env) -> u64
+pub fn get_pending_requests(e: Env) -> Vec<u64>  // Helpful for keepers
+```
+
+### Data Types
+
+```rust
+#[derive(Clone)]
+#[contracttype]
+pub struct VRFRequest {
+    pub requester: Address,      // Raffle contract
+    pub timestamp: u64,
+    pub fulfilled: bool,
+    pub random_value: Option<u64>,
+}
+```
+
+### Storage
+
+```rust
+const REQ_COUNTER: Symbol = symbol_short!("COUNTER");
+u64
+
+const REQUESTS: Symbol = symbol_short!("REQS");
+Map<u64, VRFRequest>
+```
+
+---
+
+## Data Flow Example (Auto-Restart Multi-Round!)
+
+### Happy Path - Infinite Raffle Loop
+
+```
+1. Deploy Raffle (ONE TIME ONLY):
+   Raffle::__constructor(
+     owner=deployer,
+     vrf=0xVRF,
+     xlm=0xXLM,
+     ticket_price=5_000_000,  // 0.5 XLM
+     target=10
+   )
+   → current_round = 0
+   → State: OPEN, picking_winner=false
+   → Event: RoundStarted(0)
+
+2. Round 0: Players enter
+   Player A: enter(num_tickets=2) → transfers 1 XLM
+   Player B: enter(num_tickets=3) → transfers 1.5 XLM
+   ...
+   Player J: enter(num_tickets=1) → transfers 0.5 XLM
+
+   → participants.len() = 10, total_tickets = 15
+   → Event: ReadyToDraw(round=0, participants=10)
+
+3. Round 0: Request draw
+   Anyone calls: request_draw()
+   → picking_winner = true
+   → State = DRAWING
+   → VRF.request_random(raffle_addr) → returns request_id=1
+   → Event: DrawRequested(round=0, vrf_request_id=1)
+
+4. Round 0: VRF fulfills AND auto-starts Round 1!
+   Keeper calls: VRF.fulfill_random(request_id=1)
+   → VRF generates random_value = 42069
+   → VRF calls back: Raffle.fulfill_random(random_value=42069)
+   → Raffle: winning_ticket = 42069 % 15 = 9
+   → winner = tickets[0][9] = Player B
+   → Store WinnerRecord { winner: Player B, round: 0, amount: 7.5 XLM, claimed: false }
+   → Event: WinnerSelected(round=0, winner=Player B, amount=7.5 XLM)
+
+   **AUTO-RESTART:**
+   → current_round = 1
+   → State = OPEN, picking_winner = false
+   → total_tickets = 0, prize_pool = 0
+   → Event: RoundStarted(1)
+
+   **Round 1 is now accepting entries while Player B can claim anytime!**
+
+5. Round 1: New players enter (Round 0 still has unclaimed prize!)
+   Player C: enter(num_tickets=5) → transfers 2.5 XLM
+   Player D: enter(num_tickets=5) → transfers 2.5 XLM
+   ...
+   → Round 1 continues independently
+
+6. Player B claims Round 0 prize (can be done anytime!)
+   Player B: claim_prize(round=0)
+   → Checks: winner_record[0].winner == Player B ✓
+   → Effects: winner_record[0].claimed = true
+   → Interactions: transfer 7.5 XLM to Player B
+   → Event: PrizeClaimed(round=0, winner=Player B, amount=7.5 XLM)
+
+7. Round 1 completes, auto-starts Round 2
+   → Rinse and repeat forever!
+   → One contract, infinite rounds!
+```
+
+### Edge Case: Manual Override (VRF Keeper Fails)
+
+```
+1-2. Same as above, 10 players entered
+
+3. Keeper fails to call request_draw()
+   → Frontend shows "Ready to Draw" button
+   → ANY user can call request_draw() (permissionless!)
+
+4. User manually calls: request_draw()
+   → Works exactly as in step 3 above
+
+5. Keeper fails to call VRF.fulfill_random()
+   → Frontend shows "Fulfill VRF" button on VRF contract
+   → ANY user can call VRF.fulfill_random(request_id)
+
+6. Continues normally from step 5
+```
+
+### Edge Case: Canceled Round
+
+```
+1. Round 5 has only 2 players entered (target=10)
+2. Round stuck for days
+3. Owner: cancel_raffle()
+   → State = CANCELED (only affects current round)
+4. Players call claim_refund()
+   → Player A gets refund for round 5
+   → Player B gets refund for round 5
+5. Owner can restart manually or wait for next entry
+```
+
+### Edge Case: Multiple Unclaimed Prizes
+
+```
+1. Player A wins Round 0 (10 XLM) - doesn't claim
+2. Player A wins Round 3 (15 XLM) - doesn't claim
+3. Player A wins Round 7 (20 XLM) - doesn't claim
+4. Round 10 is now running
+5. Player A: get_my_unclaimed_prizes()
+   → Returns [WinnerRecord(round=0, 10 XLM), WinnerRecord(round=3, 15 XLM), WinnerRecord(round=7, 20 XLM)]
+6. Player A: claim_all_prizes()
+   → Claims 45 XLM total
+   → All three records marked as claimed
+```
+
+---
+
+## Comparison: Original vs Final Design
+
+| Feature | Original (Over-Engineered) | Final (Perfect Balance!) |
+|---------|-------------------|---------------------------|
+| Contracts | 3 (Factory + Raffle + VRF) | 2 (Raffle + VRF) |
+| Rounds | Manual multi-round with complex restart | **Auto-restart multi-round** ✅ |
+| Draw Trigger | Time-based OR participation | Participation-only (simpler!) |
+| Refunds | Full refund mechanism | Emergency cancel only |
+| Storage | Complex multi-round maps | Efficient per-round storage |
+| Race Conditions | Not addressed | `picking_winner` flag ✅ |
+| Re-entrancy | Not addressed | CEI pattern ✅ |
+| Winner Claims | Winner must claim immediately | **Claim anytime, multiple rounds** ✅ |
+| Deployment | Factory with deterministic salt | **One deployment = infinite rounds** ✅ |
+| New Rounds | Manual `start_new_round()` calls | **Auto-restart in VRF callback** ✅ |
+| **Dev Time** | ~4-5 days | **~2 days** ✅ |
+| **UX** | Need to redeploy or manually restart | **Set and forget!** ✅ |
+
+---
+
+## Implementation Checklist (2-Day Hackathon)
+
+### Day 1: Core Contracts
+- [ ] MockVRF contract
+  - [ ] Constructor, request_random, fulfill_random
+  - [ ] Storage and events
+  - [ ] Tests: request, fulfill, callback
+- [ ] Raffle contract skeleton
+  - [ ] Constructor, storage, types
+  - [ ] enter() function with validations
+  - [ ] Tests: entry validations, multiple entries
+
+### Day 2: VRF Integration + Frontend
+- [ ] Raffle VRF integration
+  - [ ] request_draw() with picking_winner flag
+  - [ ] fulfill_random() callback
+  - [ ] claim_prize() with CEI pattern
+  - [ ] Tests: full raffle flow, race conditions, re-entrancy
+- [ ] Basic frontend
+  - [ ] Display raffle state
+  - [ ] Enter raffle form
+  - [ ] Request draw button (when ready)
+  - [ ] Fulfill VRF button (manual override)
+  - [ ] Claim prize button (for winner)
+
+---
+
+## Security Considerations (From Chainlink)
+
+### CRITICAL Patterns to Implement
+
+1. **`picking_winner` Flag** (Race Condition Prevention)
+   - Set `true` BEFORE VRF request
+   - Check in `request_draw()` to prevent double-draws
+   - Reset `false` in `claim_prize()`
+
+2. **CEI Pattern** (Re-entrancy Prevention)
+   - Checks: All validations first
+   - Effects: Update state variables
+   - Interactions: External calls LAST
+
+3. **VRF Callback Verification**
+   - ALWAYS verify `vrf == config.vrf_contract`
+   - Prevents malicious contracts from injecting fake randomness
+
+4. **Exact Payment Validation**
+   - Require `msg.value == ticket_price * num_tickets`
+   - Prevents overpayment/underpayment attacks
+
+### Nice-to-Have (If Time Permits)
+
+5. **Maximum Tickets Per Player**
+   - Prevents one player from buying all tickets
+   - `require(player_tickets + num_tickets <= MAX_PER_PLAYER)`
+
+6. **Emergency Pause**
+   - Owner can pause entries if critical bug found
+   - Simple `paused` flag
+
+---
+
+## Frontend Integration (Minimal Viable)
+
+### Required Views
+1. **Raffle Page**
+   - Show: state, participants, tickets sold, prize pool
+   - Entry form: number of tickets → calls `enter()`
+   - "Request Draw" button (only if `is_ready_to_draw()` == true)
+   - "Claim Prize" button (only if `winner == current_user`)
+
+2. **VRF Helper Page** (For Manual Override)
+   - Show pending VRF requests
+   - "Fulfill Randomness" button → calls `VRF.fulfill_random(request_id)`
+
+### Wallet Integration
+```typescript
+// Entry example
+const raffle = new RaffleClient(...);
+const numTickets = 3;
+const cost = ticketPrice * BigInt(numTickets);
+
+await raffle.enter({
+  player: userAddress,
+  num_tickets: numTickets,
+  // XLM transfer handled by contract
+});
+```
+
+---
+
+## Testing Strategy
+
+### Unit Tests (Raffle)
+- Entry validations (exact payment, state checks)
+- Multiple entries per player
+- `picking_winner` flag prevents double-draws
+- VRF callback verification (reject non-VRF callers)
+- Winner selection math (modulo distribution)
+- CEI pattern (state changes before transfer)
+- Only winner can claim
+
+### Unit Tests (VRF)
+- Request increments counter
+- Fulfill requires unfulfilled request
+- Callback to requester works
+- Anyone can fulfill (permissionless)
+
+### Integration Tests
+- Full raffle flow: enter → request → fulfill → claim
+- Race condition test: double request_draw() fails
+- Re-entrancy test: malicious winner contract can't drain
+- Manual override: users can trigger if keeper fails
+
+---
+
+## What We Removed (For Simplicity)
+
+❌ **Factory Contract** - Not needed! One raffle = infinite rounds
+❌ **Time-based draws** - Pure participation model (simpler)
+❌ **Minimum participants refund** - Keep it simple, raffle waits or cancel
+❌ **Deterministic deployment** - Not needed without Factory
+❌ **Manual round restart** - Auto-restart in VRF callback!
+
+## What We Added (From Chainlink + Better UX)
+
+✅ **`picking_winner` flag** - Critical race condition prevention
+✅ **CEI pattern** - Re-entrancy protection
+✅ **Participation-based trigger** - Simpler than time logic
+✅ **Manual override capability** - Anyone can trigger if keeper fails
+✅ **VRF callback verification** - Security against fake randomness
+✅ **Exact payment validation** - Prevent payment attacks
+✅ **Auto-restart rounds** - VRF callback starts next round automatically
+✅ **Perpetual winner storage** - Winners can claim anytime across all rounds
+✅ **claim_all_prizes()** - Bulk claim helper for multi-round winners
+
+---
+
+## Success Criteria (Hackathon Demo)
+
+### Round 0 (First Draw)
+1. ✅ Deploy Raffle with target=5 participants (ONE TIME DEPLOYMENT!)
+2. ✅ 5 users enter Round 0 with varying ticket amounts
+3. ✅ Frontend shows "Ready to Draw" when target met
+4. ✅ Call `request_draw()` → state changes to DRAWING
+5. ✅ Call `VRF.fulfill_random()` → winner selected **AND Round 1 auto-starts!**
+6. ✅ Show Round 0 winner in "My Unclaimed Prizes"
+
+### Round 1 (Auto-Started!)
+7. ✅ Round 1 is already OPEN and accepting entries (no manual action needed!)
+8. ✅ 5 new users enter Round 1
+9. ✅ Round 0 winner claims prize while Round 1 is running
+10. ✅ Round 1 completes → auto-starts Round 2
+
+### Demo the Magic
+11. ✅ Show that raffle runs **infinitely** without redeployment
+12. ✅ Show multiple unclaimed prizes for same user
+13. ✅ Demonstrate `claim_all_prizes()` for multi-round winner
+
+**That's it! Deploy once, runs forever. Simple, secure, achievable in 2 days.**
