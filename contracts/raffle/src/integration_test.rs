@@ -83,7 +83,7 @@ fn setup_integration_test<'a>(
 #[test]
 fn test_full_raffle_flow() {
     let env = Env::default();
-    let (raffle_id, raffle_client, _, token_client, token_admin, vrf_id) = setup_integration_test(&env);
+    let (raffle_id, raffle_client, _, _, token_admin, vrf_id) = setup_integration_test(&env);
     env.mock_all_auths();
 
     // Create 3 users
@@ -192,7 +192,7 @@ fn test_claim_prize() {
 #[test]
 fn test_multiple_rounds() {
     let env = Env::default();
-    let (raffle_id, raffle_client, _, token_client, token_admin, vrf_id) = setup_integration_test(&env);
+    let (raffle_id, raffle_client, _, _, token_admin, vrf_id) = setup_integration_test(&env);
     env.mock_all_auths();
 
     let alice = Address::generate(&env);
@@ -278,7 +278,7 @@ fn test_claim_all_prizes() {
 #[test]
 fn test_winner_selection_fairness() {
     let env = Env::default();
-    let (raffle_id, raffle_client, _, token_client, token_admin, vrf_id) = setup_integration_test(&env);
+    let (raffle_id, raffle_client, _, _, token_admin, vrf_id) = setup_integration_test(&env);
     env.mock_all_auths();
 
     let alice = Address::generate(&env);
@@ -380,7 +380,7 @@ fn test_round_state_transitions() {
 #[test]
 fn test_bucket_pattern_many_participants() {
     let env = Env::default();
-    let (raffle_id, raffle_client, _, token_client, token_admin, _) = setup_integration_test(&env);
+    let (_, raffle_client, _, _, token_admin, _) = setup_integration_test(&env);
     env.mock_all_auths();
 
     // Create 10 participants (bucket size is 100, so this tests single bucket)
