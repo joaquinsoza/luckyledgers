@@ -221,7 +221,7 @@ async function main() {
   console.log("╚════════════════════════════════════════╝\n");
 
   console.log("Summary:");
-  console.log(`  ✓ ${RAFFLE_CONFIG.TARGET_PARTICIPANTS} accounts created`);
+  console.log(`  ✓ 25 accounts created`);
   console.log(`  ✓ ${stats.total_tickets} tickets purchased`);
   console.log(`  ✓ Prize pool: ${stats.prize_pool}`);
   console.log(`  ✓ VRF draw completed`);

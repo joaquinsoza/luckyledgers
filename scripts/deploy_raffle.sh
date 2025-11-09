@@ -14,13 +14,13 @@ NC='\033[0m' # No Color
 # Configuration
 SOURCE_ACCOUNT="lucky"
 WASM_NAME="raffle"
-CONTRACT_NAME="raffle_2"
+CONTRACT_NAME="raffle_3"
 NETWORK="${NETWORK:-testnet}"  # Default to testnet, override with NETWORK env var
 
 # Constructor arguments
 VRF_CONTRACT="CCD5LKJMSWE55ZLTAKYF4EPNOF7XAJFBA6Q6EOGF6EHL2OXTSTX6IRYO"
 UNDERLYING_TOKEN="CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC"  # XLM on testnet
-TICKET_PRICE="10000000000"  # 1000 XLM per ticket
+TICKET_PRICE="100000000"  # 10 XLM per ticket
 TARGET_TICKETS="250"        # Total tickets needed to trigger draw
 MAX_TICKETS_PER_PARTICIPANT="10"  # Max tickets per wallet
 
@@ -70,7 +70,7 @@ stellar registry publish \
     --wasm target/wasm32v1-none/release/raffle.wasm \
     --source-account ${SOURCE_ACCOUNT} \
     --wasm-name ${WASM_NAME} \
-    --binver "1.1.0"
+    --binver "1.2.0"
 
 if [ $? -ne 0 ]; then
     echo -e "${RED}Publish failed!${NC}"

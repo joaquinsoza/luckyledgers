@@ -48,7 +48,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
 
 // Define a replacer function for BigInt serialization in JSON
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-function bigintReplacer(key: string, value: any) {
+function bigintReplacer(_key: string, value: any) {
   // eslint-disable-next-line @typescript-eslint/no-unsafe-return
   return typeof value === "bigint" ? value.toString() : value;
 }

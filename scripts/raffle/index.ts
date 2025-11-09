@@ -22,35 +22,32 @@ async function main() {
   console.log("========================================\n");
 
   // Step 1: Create and fund multiple user accounts
-  console.log(
-    `Step 1: Creating ${RAFFLE_CONFIG.TARGET_PARTICIPANTS} user accounts...\n`,
-  );
+  const numUsers = 25; // Create 25 users
+  console.log(`Step 1: Creating ${numUsers} user accounts...\n`);
 
   const users: Keypair[] = [];
 
-  for (let i = 0; i < RAFFLE_CONFIG.TARGET_PARTICIPANTS; i++) {
+  for (let i = 0; i < numUsers; i++) {
     const user = await createAndFundAccount();
     users.push(user);
+    console.log(`  [${i + 1}/${numUsers}] Created ${user.publicKey()}`);
   }
 
-  console.log(`✓ Created and funded ${users.length} accounts\n`);
+  console.log(`\n✓ Created and funded ${users.length} accounts\n`);
 
   // Step 2: Users enter the raffle with varying ticket amounts
-  console.log("Step 2: Users entering raffle...\n");
+  // Goal: Reach 250 tickets with max 10 tickets per user
+  console.log(
+    `Step 2: Users entering raffle (target: ${RAFFLE_CONFIG.TARGET_TICKETS} tickets)...\n`,
+  );
 
-  // First 10 users buy 1 ticket each
-  for (let i = 0; i < 10; i++) {
-    await enterRaffle(1, users[i]);
-  }
-
-  // Next 10 users buy 3 tickets each
-  for (let i = 10; i < 20; i++) {
-    await enterRaffle(3, users[i]);
-  }
-
-  // Last 5 users buy 10 tickets each
-  for (let i = 20; i < 25; i++) {
-    await enterRaffle(10, users[i]);
+  // All 25 users buy 10 tickets each = 250 tickets total
+  console.log("All users buying max tickets (10 each)...");
+  for (let i = 0; i < 25; i++) {
+    await enterRaffle(RAFFLE_CONFIG.MAX_TICKETS_PER_PARTICIPANT, users[i]);
+    console.log(
+      `  ✓ User ${i + 1} bought ${RAFFLE_CONFIG.MAX_TICKETS_PER_PARTICIPANT} tickets`,
+    );
   }
 
   console.log("\n✓ All users entered\n");
