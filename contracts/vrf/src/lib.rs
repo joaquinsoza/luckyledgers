@@ -13,6 +13,7 @@ pub struct MockVRF;
 #[contractimpl]
 impl MockVRF {
     /// Request random number and immediately call back (INSECURE - for testing only)
+    /// In production this would be done by a VRF protocol fulfilling in a separated call
     ///
     /// Generates pseudo-random u64 using env.prng() and immediately calls
     /// requester.fulfill_random(vrf_address, random_value)
@@ -35,6 +36,7 @@ impl MockVRF {
     }
 
     /// Manually trigger callback with specific random value (for testing)
+    /// For production this should be guarded by an admin
     pub fn fulfill_manual(env: Env, requester: Address, random_value: u64) {
         let callback_args: Vec<Val> = (
             env.current_contract_address(),

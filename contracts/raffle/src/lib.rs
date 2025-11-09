@@ -1,5 +1,5 @@
 #![no_std]
-use soroban_sdk::{contract, contractimpl, Address, BytesN, Env, Vec};
+use soroban_sdk::{contract, contractimpl, Address, BytesN, Env, IntoVal, Symbol, Val, Vec};
 
 mod error;
 mod events;
@@ -113,19 +113,23 @@ impl LuckyLedgersRaffle {
         // Transition to DRAWING state
         storage::set_round_state(&env, round_num, State::DRAWING);
 
-        // TODO: VRF cross-contract call
-        // let vrf_client = VRFClient::new(&env, &config.vrf_contract);
-        // let request_id = vrf_client.request_random(&env.current_contract_address());
+        // Call VRF contract to request random number
+        let vrf_args: Vec<Val> = (env.current_contract_address(),).into_val(&env);
 
-        // For now, use mock request_id
-        let mock_request_id = round_num as u64;
-        storage::set_round_vrf_request(&env, round_num, mock_request_id);
+        let random_value: u64 = env.invoke_contract(
+            &config.vrf_contract,
+            &Symbol::new(&env, "request_random"),
+            vrf_args,
+        );
+
+        // Store the random value (VRF immediately calls back with fulfill_random)
+        storage::set_round_vrf_request(&env, round_num, random_value);
 
         // Emit event
-        events::emit_draw_requested(&env, round_num, mock_request_id);
+        events::emit_draw_requested(&env, round_num, random_value);
 
         storage::extend_instance_ttl(&env);
-        Ok(mock_request_id)
+        Ok(random_value)
     }
 
     /// VRF callback to fulfill randomness and select winner (AUTO-RESTART!)
