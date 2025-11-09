@@ -15,12 +15,13 @@ pub struct LuckyLedgersRaffle;
 #[contractimpl]
 impl LuckyLedgersRaffle {
     pub fn __constructor(
-        env: &Env, 
+        env: &Env,
         admin: Address,
         vrf_contract: Address,       // MockVRF address
         underlying_token: Address,   // Underlying Token address
         ticket_price: i128,          // e.g., 5_000_000 = 0.5 XLM
-        target_participants: u32     // e.g., 10 players triggers draw // TODO: Should i do target_participants or target_tickets? what about a ticket cap per participant? what if a buys deposits 1000 tickets right at then end? is way more probable for him to take everything
+        target_tickets: u32,         // e.g., 250 tickets triggers draw
+        max_tickets_per_participant: u32  // e.g., 10 tickets max per wallet
     ) {
         // Set the admin in storage
         storage::set_admin(env, &admin);
@@ -29,7 +30,8 @@ impl LuckyLedgersRaffle {
             vrf_contract,
             underlying_token,
             ticket_price,
-            target_participants
+            target_tickets,
+            max_tickets_per_participant
         };
 
         storage::set_config(env, config);
@@ -52,8 +54,21 @@ impl LuckyLedgersRaffle {
         // Get current round stats
         let mut stats = storage::get_round_stats(&env, round_num)?;
 
-        // Calculate payment amount
-        let amount = (num_tickets as i128)
+        // Check if this is user's first entry (new participant)
+        let previous_tickets = storage::get_user_tickets(&env, round_num, &caller);
+        let is_new_participant = previous_tickets == 0;
+
+        // Auto-cap: ensure user doesn't exceed max_tickets_per_participant
+        let remaining_allowance = config.max_tickets_per_participant.saturating_sub(previous_tickets);
+        let tickets_to_buy = num_tickets.min(remaining_allowance);
+
+        // If user is already at cap or tries to buy 0, return current total
+        if tickets_to_buy == 0 {
+            return Ok(previous_tickets);
+        }
+
+        // Calculate payment amount based on tickets actually being purchased
+        let amount = (tickets_to_buy as i128)
             .checked_mul(config.ticket_price)
             .unwrap();
 
@@ -63,13 +78,9 @@ impl LuckyLedgersRaffle {
 
         // Here the transfered amount could be deposited into Blend or DeFindex
 
-        // Check if this is user's first entry (new participant)
-        let previous_tickets = storage::get_user_tickets(&env, round_num, &caller);
-        let is_new_participant = previous_tickets == 0;
-
         // Add tickets for user
-        storage::add_user_tickets(&env, round_num, &caller, num_tickets);
-        let user_total_tickets = previous_tickets + num_tickets;
+        storage::add_user_tickets(&env, round_num, &caller, tickets_to_buy);
+        let user_total_tickets = previous_tickets + tickets_to_buy;
 
         // If new participant, add to participant bucket
         if is_new_participant {
@@ -79,16 +90,16 @@ impl LuckyLedgersRaffle {
         }
 
         // Update round stats
-        stats.total_tickets = stats.total_tickets.checked_add(num_tickets).unwrap();
+        stats.total_tickets = stats.total_tickets.checked_add(tickets_to_buy).unwrap();
         stats.prize_pool = stats.prize_pool.checked_add(amount).unwrap();
         storage::set_round_stats(&env, round_num, &stats);
 
         // Emit event
-        events::emit_player_entered(&env, round_num, &caller, num_tickets, stats.total_tickets);
+        events::emit_player_entered(&env, round_num, &caller, tickets_to_buy, stats.total_tickets);
 
-        // Check if we've reached target participants
-        if stats.total_participants >= config.target_participants {
-            events::emit_ready_to_draw(&env, round_num, stats.total_participants);
+        // Check if we've reached target tickets
+        if stats.total_tickets >= config.target_tickets {
+            events::emit_ready_to_draw(&env, round_num, stats.total_tickets);
         }
 
         storage::extend_instance_ttl(&env);
@@ -106,9 +117,9 @@ impl LuckyLedgersRaffle {
             return Err(Error::InvalidState);
         }
 
-        // Check if target participants met
+        // Check if target tickets met
         let stats = storage::get_round_stats(&env, round_num)?;
-        if stats.total_participants < config.target_participants {
+        if stats.total_tickets < config.target_tickets {
             return Err(Error::TargetNotMet);
         }
 
@@ -330,7 +341,7 @@ impl LuckyLedgersRaffle {
         let round = storage::get_current_round(&env)?;
         let stats = storage::get_round_stats(&env, round.round)?;
 
-        Ok(round.state == State::OPEN && stats.total_participants >= config.target_participants)
+        Ok(round.state == State::OPEN && stats.total_tickets >= config.target_tickets)
     }
 
     /// Get contract configuration

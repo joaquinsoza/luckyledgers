@@ -14,7 +14,8 @@ pub struct Config {
     pub vrf_contract: Address,
     pub underlying_token: Address,
     pub ticket_price: i128,
-    pub target_participants: u32
+    pub target_tickets: u32,
+    pub max_tickets_per_participant: u32
 }
 
 #[contracttype]

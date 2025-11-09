@@ -42,12 +42,13 @@ fn setup_raffle<'a>(env: &Env) -> (Address, LuckyLedgersRaffleClient<'a>, Addres
     let vrf_id = env.register(mock_vrf::MockVRF, ());
 
     let ticket_price = 1_000_000i128; // 0.1 tokens (7 decimals)
-    let target_participants = 5u32;
+    let target_tickets = 25u32; // Total tickets needed to trigger draw
+    let max_tickets_per_participant = 10u32; // Max 10 tickets per wallet
 
     // Register raffle contract with constructor arguments
     let raffle_id = env.register(
         LuckyLedgersRaffle,
-        (&admin, &vrf_id, &token_id, &ticket_price, &target_participants),
+        (&admin, &vrf_id, &token_id, &ticket_price, &target_tickets, &max_tickets_per_participant),
     );
     let raffle_client = LuckyLedgersRaffleClient::new(env, &raffle_id);
 
@@ -66,7 +67,8 @@ fn test_constructor_initializes_correctly() {
     let config = raffle_client.get_config();
     assert_eq!(config.underlying_token, token_id);
     assert_eq!(config.ticket_price, 1_000_000i128);
-    assert_eq!(config.target_participants, 5);
+    assert_eq!(config.target_tickets, 25);
+    assert_eq!(config.max_tickets_per_participant, 10);
 
     // Verify initial round is created
     let current_round = raffle_client.get_current_round_number();
@@ -177,23 +179,32 @@ fn test_is_ready_to_draw() {
     let (_, raffle_client, _, _, token_admin) = setup_raffle(&env);
     env.mock_all_auths();
 
-    // Not ready with 0 participants
+    // Not ready with 0 tickets
     assert_eq!(raffle_client.is_ready_to_draw(), false);
 
-    // Add 4 participants (target is 5)
-    for _ in 0..4 {
-        let user = Address::generate(&env);
-        token_admin.mint(&user, &10_000_000i128);
-        raffle_client.enter(&user, &1);
-    }
+    // Add 24 tickets (target is 25)
+    // User 1 buys 10 tickets (max)
+    let user1 = Address::generate(&env);
+    token_admin.mint(&user1, &100_000_000i128);
+    raffle_client.enter(&user1, &10);
 
-    // Still not ready
+    // User 2 buys 10 tickets (max)
+    let user2 = Address::generate(&env);
+    token_admin.mint(&user2, &100_000_000i128);
+    raffle_client.enter(&user2, &10);
+
+    // User 3 buys 4 tickets (total now 24)
+    let user3 = Address::generate(&env);
+    token_admin.mint(&user3, &100_000_000i128);
+    raffle_client.enter(&user3, &4);
+
+    // Still not ready (24 < 25)
     assert_eq!(raffle_client.is_ready_to_draw(), false);
 
-    // Add 5th participant
-    let user = Address::generate(&env);
-    token_admin.mint(&user, &10_000_000i128);
-    raffle_client.enter(&user, &1);
+    // User 4 buys 1 ticket (total now 25, reaches target)
+    let user4 = Address::generate(&env);
+    token_admin.mint(&user4, &10_000_000i128);
+    raffle_client.enter(&user4, &1);
 
     // Now ready
     assert_eq!(raffle_client.is_ready_to_draw(), true);
@@ -250,4 +261,41 @@ fn test_enter_raffle_not_open() {
     // Try to enter - should fail
     let result = raffle_client.try_enter(&alice, &1);
     assert!(result.is_err());
+}
+
+#[test]
+fn test_ticket_cap_enforcement() {
+    let env = Env::default();
+    let (_, raffle_client, _, _, token_admin) = setup_raffle(&env);
+    env.mock_all_auths();
+
+    let alice = Address::generate(&env);
+    token_admin.mint(&alice, &200_000_000i128);
+
+    // Buy 8 tickets (under max of 10)
+    let result = raffle_client.enter(&alice, &8);
+    assert_eq!(result, 8);
+
+    // Try to buy 5 more tickets (would exceed max of 10)
+    // Should auto-cap to only 2 tickets (remaining allowance)
+    let result = raffle_client.enter(&alice, &5);
+    assert_eq!(result, 10); // Total should be capped at 10
+
+    // Verify user has exactly 10 tickets
+    let tickets = raffle_client.get_user_tickets(&1, &alice);
+    assert_eq!(tickets, 10);
+
+    // Verify stats show correct totals
+    let stats = raffle_client.get_round_stats(&1);
+    assert_eq!(stats.total_tickets, 10);
+    assert_eq!(stats.prize_pool, 10_000_000i128);
+
+    // Try to buy more - should return current total without buying
+    let result = raffle_client.enter(&alice, &1);
+    assert_eq!(result, 10); // Still at cap
+
+    // Verify no additional tickets or payment
+    let stats = raffle_client.get_round_stats(&1);
+    assert_eq!(stats.total_tickets, 10); // Unchanged
+    assert_eq!(stats.prize_pool, 10_000_000i128); // Unchanged
 }

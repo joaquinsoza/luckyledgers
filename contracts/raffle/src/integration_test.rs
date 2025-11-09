@@ -68,12 +68,13 @@ fn setup_integration_test<'a>(
     let vrf_id = env.register(mock_vrf::MockVRF, ());
 
     let ticket_price = 1_000_000i128; // 0.1 tokens
-    let target_participants = 3u32; // Small target for testing
+    let target_tickets = 9u32; // Small target for testing (3 users × 3 tickets each)
+    let max_tickets_per_participant = 5u32; // Max 5 tickets per wallet
 
     // Register raffle contract with constructor arguments
     let raffle_id = env.register(
         LuckyLedgersRaffle,
-        (&admin, &vrf_id, &token_id, &ticket_price, &target_participants),
+        (&admin, &vrf_id, &token_id, &ticket_price, &target_tickets, &max_tickets_per_participant),
     );
     let raffle_client = LuckyLedgersRaffleClient::new(env, &raffle_id);
 
@@ -96,16 +97,16 @@ fn test_full_raffle_flow() {
     token_admin.mint(&bob, &100_000_000i128);
     token_admin.mint(&charlie, &100_000_000i128);
 
-    // Users enter raffle (round 1)
-    raffle_client.enter(&alice, &2);
-    raffle_client.enter(&bob, &1);
-    raffle_client.enter(&charlie, &1);
+    // Users enter raffle (round 1) - need 9 tickets total to trigger
+    raffle_client.enter(&alice, &5); // Alice buys 5 tickets
+    raffle_client.enter(&bob, &3);   // Bob buys 3 tickets
+    raffle_client.enter(&charlie, &1); // Charlie buys 1 ticket
 
     // Verify round 1 stats
     let stats = raffle_client.get_round_stats(&1);
     assert_eq!(stats.total_participants, 3);
-    assert_eq!(stats.total_tickets, 4);
-    assert_eq!(stats.prize_pool, 4_000_000i128);
+    assert_eq!(stats.total_tickets, 9);
+    assert_eq!(stats.prize_pool, 9_000_000i128);
 
     // Should be ready to draw
     assert!(raffle_client.is_ready_to_draw());
@@ -125,7 +126,7 @@ fn test_full_raffle_flow() {
     // Verify a winner was selected
     let winner_record = raffle_client.get_winner(&1).unwrap();
     assert_eq!(winner_record.round, 1);
-    assert_eq!(winner_record.amount, 4_000_000i128);
+    assert_eq!(winner_record.amount, 9_000_000i128);
     assert!(!winner_record.claimed);
 
     // Verify auto-restart: round 2 should be created
@@ -153,10 +154,10 @@ fn test_claim_prize() {
     token_admin.mint(&bob, &100_000_000i128);
     token_admin.mint(&charlie, &100_000_000i128);
 
-    // Enter raffle
-    raffle_client.enter(&alice, &10); // Alice has 10 tickets
-    raffle_client.enter(&bob, &1);
-    raffle_client.enter(&charlie, &1);
+    // Enter raffle - need 9 tickets total
+    raffle_client.enter(&alice, &5); // Alice has 5 tickets (max per participant)
+    raffle_client.enter(&bob, &3);   // Bob has 3 tickets
+    raffle_client.enter(&charlie, &1); // Charlie has 1 ticket
 
     // Request draw and manually fulfill
     let _request_id = raffle_client.request_draw();
@@ -205,9 +206,9 @@ fn test_multiple_rounds() {
 
     // Run 3 rounds
     for round in 1..=3 {
-        // Enter raffle
-        raffle_client.enter(&alice, &1);
-        raffle_client.enter(&bob, &1);
+        // Enter raffle - need 9 tickets total
+        raffle_client.enter(&alice, &5);
+        raffle_client.enter(&bob, &3);
         raffle_client.enter(&charlie, &1);
 
         // Request draw and manually fulfill
@@ -243,11 +244,11 @@ fn test_claim_all_prizes() {
     token_admin.mint(&bob, &1_000_000_000i128);
     token_admin.mint(&charlie, &1_000_000_000i128);
 
-    // Run 3 rounds where Alice dominates
+    // Run 3 rounds where Alice dominates (within max cap of 5)
     for _ in 1..=3 {
-        raffle_client.enter(&alice, &100);
-        raffle_client.enter(&bob, &1);
-        raffle_client.enter(&charlie, &1);
+        raffle_client.enter(&alice, &5); // Alice buys max 5 tickets
+        raffle_client.enter(&bob, &3);   // Bob buys 3 tickets
+        raffle_client.enter(&charlie, &1); // Charlie buys 1 ticket
         let _request_id = raffle_client.request_draw();
         let vrf_client = mock_vrf::MockVRFClient::new(&env, &vrf_id);
         let random_value = vrf_client.get_random();
@@ -289,10 +290,10 @@ fn test_winner_selection_fairness() {
     token_admin.mint(&bob, &100_000_000i128);
     token_admin.mint(&charlie, &100_000_000i128);
 
-    // Alice gets 10 tickets, Bob gets 1, Charlie gets 1
-    // Alice has 10/12 = 83% chance of winning
-    raffle_client.enter(&alice, &10);
-    raffle_client.enter(&bob, &1);
+    // Alice gets 5 tickets (max), Bob gets 3, Charlie gets 1 (total 9)
+    // Alice has 5/9 = 55.5% chance of winning
+    raffle_client.enter(&alice, &5);
+    raffle_client.enter(&bob, &3);
     raffle_client.enter(&charlie, &1);
 
     let _request_id = raffle_client.request_draw();
@@ -351,9 +352,9 @@ fn test_round_state_transitions() {
     let round_info = raffle_client.get_round_info(&1);
     assert_eq!(round_info.state, State::OPEN);
 
-    // Enter raffle
-    raffle_client.enter(&alice, &1);
-    raffle_client.enter(&bob, &1);
+    // Enter raffle - need 9 tickets total
+    raffle_client.enter(&alice, &5);
+    raffle_client.enter(&bob, &3);
     raffle_client.enter(&charlie, &1);
 
     // Still OPEN

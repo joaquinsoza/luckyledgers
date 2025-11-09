@@ -14,14 +14,15 @@ NC='\033[0m' # No Color
 # Configuration
 SOURCE_ACCOUNT="lucky"
 WASM_NAME="raffle"
-CONTRACT_NAME="raffle"
+CONTRACT_NAME="raffle_2"
 NETWORK="${NETWORK:-testnet}"  # Default to testnet, override with NETWORK env var
 
 # Constructor arguments
 VRF_CONTRACT="CCD5LKJMSWE55ZLTAKYF4EPNOF7XAJFBA6Q6EOGF6EHL2OXTSTX6IRYO"
 UNDERLYING_TOKEN="CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC"  # XLM on testnet
-TICKET_PRICE="1000000000"  # 100 XLM per entry
-TARGET_PARTICIPANTS="25"   # Minimum participants to trigger draw
+TICKET_PRICE="10000000000"  # 1000 XLM per ticket
+TARGET_TICKETS="250"        # Total tickets needed to trigger draw
+MAX_TICKETS_PER_PARTICIPANT="10"  # Max tickets per wallet
 
 echo -e "${GREEN}========================================${NC}"
 echo -e "${GREEN}Raffle Contract Deployment${NC}"
@@ -35,8 +36,9 @@ echo ""
 echo -e "Constructor Arguments:"
 echo -e "  VRF Contract: ${YELLOW}${VRF_CONTRACT}${NC}"
 echo -e "  Underlying Token: ${YELLOW}${UNDERLYING_TOKEN}${NC}"
-echo -e "  Ticket Price: ${YELLOW}${TICKET_PRICE}${NC} (100 XLM)"
-echo -e "  Target Participants: ${YELLOW}${TARGET_PARTICIPANTS}${NC}"
+echo -e "  Ticket Price: ${YELLOW}${TICKET_PRICE}${NC} (1000 XLM)"
+echo -e "  Target Tickets: ${YELLOW}${TARGET_TICKETS}${NC}"
+echo -e "  Max Tickets Per Participant: ${YELLOW}${MAX_TICKETS_PER_PARTICIPANT}${NC}"
 echo ""
 
 # Step 1: Build the contract
@@ -68,7 +70,7 @@ stellar registry publish \
     --wasm target/wasm32v1-none/release/raffle.wasm \
     --source-account ${SOURCE_ACCOUNT} \
     --wasm-name ${WASM_NAME} \
-    --binver "1.0.0"
+    --binver "1.1.0"
 
 if [ $? -ne 0 ]; then
     echo -e "${RED}Publish failed!${NC}"
@@ -89,7 +91,8 @@ stellar registry deploy \
     --vrf_contract ${VRF_CONTRACT} \
     --underlying_token ${UNDERLYING_TOKEN} \
     --ticket_price ${TICKET_PRICE} \
-    --target_participants ${TARGET_PARTICIPANTS}
+    --target_tickets ${TARGET_TICKETS} \
+    --max_tickets_per_participant ${MAX_TICKETS_PER_PARTICIPANT}
 
 if [ $? -ne 0 ]; then
     echo -e "${RED}Deployment failed!${NC}"
@@ -112,20 +115,6 @@ fi
 echo -e "${GREEN} Alias created${NC}"
 echo ""
 
-# Step 6: Get contract ID
-echo -e "${YELLOW}Step 6: Retrieving contract ID...${NC}"
-CONTRACT_ID=$(stellar contract id ${CONTRACT_NAME})
-
-if [ -z "$CONTRACT_ID" ]; then
-    echo -e "${RED}Failed to retrieve contract ID!${NC}"
-    exit 1
-fi
-
-# Save contract ID to file
-echo ${CONTRACT_ID} > .raffle-contract-id
-echo -e "${GREEN} Contract ID saved to .raffle-contract-id${NC}"
-echo ""
-
 # Success summary
 echo -e "${GREEN}========================================${NC}"
 echo -e "${GREEN}Deployment Complete! ${NC}"
@@ -137,12 +126,13 @@ echo -e "Configuration:"
 echo -e "  Admin: ${YELLOW}${ADMIN_ADDRESS}${NC}"
 echo -e "  VRF Contract: ${YELLOW}${VRF_CONTRACT}${NC}"
 echo -e "  Token: ${YELLOW}${UNDERLYING_TOKEN}${NC} (XLM)"
-echo -e "  Ticket Price: ${YELLOW}100 XLM${NC}"
-echo -e "  Target Participants: ${YELLOW}${TARGET_PARTICIPANTS}${NC}"
+echo -e "  Ticket Price: ${YELLOW}1000 XLM${NC}"
+echo -e "  Target Tickets: ${YELLOW}${TARGET_TICKETS}${NC}"
+echo -e "  Max Tickets Per Participant: ${YELLOW}${MAX_TICKETS_PER_PARTICIPANT}${NC}"
 echo ""
 echo -e "Next steps:"
-echo -e "  1. Users can now buy tickets with ${YELLOW}raffle.enter()${NC}"
-echo -e "  2. When ${YELLOW}${TARGET_PARTICIPANTS}${NC} participants join, call ${YELLOW}raffle.request_draw()${NC}"
+echo -e "  1. Users can buy up to ${YELLOW}${MAX_TICKETS_PER_PARTICIPANT}${NC} tickets each with ${YELLOW}raffle.enter()${NC}"
+echo -e "  2. When ${YELLOW}${TARGET_TICKETS}${NC} tickets are purchased, call ${YELLOW}raffle.request_draw()${NC}"
 echo -e "  3. Oracle will call ${YELLOW}vrf.fulfill()${NC} to complete the draw"
 echo ""
 echo -e "${GREEN}Deployment successful!${NC}"

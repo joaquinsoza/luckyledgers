@@ -21,7 +21,10 @@ async function main() {
   console.log("╚════════════════════════════════════════╝\n");
 
   console.log("Configuration:");
-  console.log(`  Target Participants: ${RAFFLE_CONFIG.TARGET_PARTICIPANTS}`);
+  console.log(`  Target Tickets: ${RAFFLE_CONFIG.TARGET_TICKETS}`);
+  console.log(
+    `  Max Tickets Per Participant: ${RAFFLE_CONFIG.MAX_TICKETS_PER_PARTICIPANT}`,
+  );
   console.log(`  Ticket Price: ${RAFFLE_CONFIG.TICKET_PRICE}`);
   console.log(`  VRF Contract: ${CONTRACTS.VRF}`);
   console.log(`  Raffle Contract: ${CONTRACTS.RAFFLE}`);
@@ -35,17 +38,14 @@ async function main() {
   console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n");
 
   const users: Keypair[] = [];
+  const numUsers = 25; // Create 25 test accounts
 
-  console.log(
-    `Creating ${RAFFLE_CONFIG.TARGET_PARTICIPANTS} test accounts...\n`,
-  );
+  console.log(`Creating ${numUsers} test accounts...\n`);
 
-  for (let i = 0; i < RAFFLE_CONFIG.TARGET_PARTICIPANTS; i++) {
+  for (let i = 0; i < numUsers; i++) {
     const user = await createAndFundAccount();
     users.push(user);
-    console.log(
-      `  [${i + 1}/${RAFFLE_CONFIG.TARGET_PARTICIPANTS}] ${user.publicKey()}`,
-    );
+    console.log(`  [${i + 1}/${numUsers}] ${user.publicKey()}`);
   }
 
   console.log(`\n✓ All accounts created and funded\n`);
@@ -57,34 +57,63 @@ async function main() {
   console.log("PHASE 2: Raffle Entry");
   console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n");
 
-  // Distribute tickets:
-  // - 10 users: 1 ticket each (10 tickets)
-  // - 10 users: 3 tickets each (30 tickets)
-  // - 5 users: 10 tickets each (50 tickets)
-  // Total: 90 tickets, 25 participants
+  // Distribute tickets (respecting max 10 tickets per participant):
+  // - 5 users: 10 tickets each (50 tickets) - at max cap
+  // - 10 users: 8 tickets each (80 tickets) - close to cap
+  // - 10 users: 12 tickets each → auto-capped to 10 (100 tickets) - tests auto-cap
+  // Total: 230 tickets, 25 participants
+  // Still under target of 250, so we'll need a few more entries
 
   console.log("Users entering with varying ticket amounts...\n");
 
-  // Group 1: 1 ticket each
-  console.log("Group 1: 10 users buying 1 ticket each...");
-  for (let i = 0; i < 10; i++) {
-    await enterRaffle(1, users[i]);
-    console.log(`  ✓ User ${i + 1} entered with 1 ticket`);
-  }
-
-  // Group 2: 3 tickets each
-  console.log("\nGroup 2: 10 users buying 3 tickets each...");
-  for (let i = 10; i < 20; i++) {
-    await enterRaffle(3, users[i]);
-    console.log(`  ✓ User ${i + 1} entered with 3 tickets`);
-  }
-
-  // Group 3: 10 tickets each
-  console.log("\nGroup 3: 5 users buying 10 tickets each...");
-  for (let i = 20; i < 25; i++) {
+  // Group 1: Buy exactly at cap (10 tickets)
+  console.log("Group 1: 5 users buying 10 tickets each (at max cap)...");
+  for (let i = 0; i < 5; i++) {
     await enterRaffle(10, users[i]);
     console.log(`  ✓ User ${i + 1} entered with 10 tickets`);
   }
+
+  // Group 2: Buy 8 tickets each
+  console.log("\nGroup 2: 10 users buying 8 tickets each...");
+  for (let i = 5; i < 15; i++) {
+    await enterRaffle(8, users[i]);
+    console.log(`  ✓ User ${i + 1} entered with 8 tickets`);
+  }
+
+  // Group 3: Try to buy 12 tickets (will be auto-capped to 10)
+  console.log(
+    "\nGroup 3: 10 users trying to buy 12 tickets each (auto-capped to 10)...",
+  );
+  for (let i = 15; i < 25; i++) {
+    await enterRaffle(12, users[i]);
+    console.log(
+      `  ✓ User ${i + 1} entered (requested 12, capped to 10 tickets)`,
+    );
+  }
+
+  // Add a few more tickets to reach target
+  console.log("\nFinal top-ups to reach target tickets...");
+  await enterRaffle(2, users[5]); // User 6 now has 10 total
+  console.log(`  ✓ User 6 bought 2 more tickets (now at 10 total)`);
+  await enterRaffle(2, users[6]); // User 7 now has 10 total
+  console.log(`  ✓ User 7 bought 2 more tickets (now at 10 total)`);
+  await enterRaffle(2, users[7]); // User 8 now has 10 total
+  console.log(`  ✓ User 8 bought 2 more tickets (now at 10 total)`);
+  await enterRaffle(2, users[8]); // User 9 now has 10 total
+  console.log(`  ✓ User 9 bought 2 more tickets (now at 10 total)`);
+  await enterRaffle(2, users[9]); // User 10 now has 10 total
+  console.log(`  ✓ User 10 bought 2 more tickets (now at 10 total)`);
+  await enterRaffle(2, users[10]); // User 11 now has 10 total
+  console.log(`  ✓ User 11 bought 2 more tickets (now at 10 total)`);
+  await enterRaffle(2, users[11]); // User 12 now has 10 total
+  console.log(`  ✓ User 12 bought 2 more tickets (now at 10 total)`);
+  await enterRaffle(2, users[12]); // User 13 now has 10 total
+  console.log(`  ✓ User 13 bought 2 more tickets (now at 10 total)`);
+  await enterRaffle(2, users[13]); // User 14 now has 10 total
+  console.log(`  ✓ User 14 bought 2 more tickets (now at 10 total)`);
+  await enterRaffle(2, users[14]); // User 15 now has 10 total
+  console.log(`  ✓ User 15 bought 2 more tickets (now at 10 total)`);
+  // Total: 230 + 20 = 250 tickets!
 
   console.log("\n✓ All users entered the raffle\n");
 
