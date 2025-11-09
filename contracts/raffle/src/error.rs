@@ -2,15 +2,29 @@
 #[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Ord)]
 #[repr(u32)]
 pub enum Error {
+    // Storage Errors
     AdminNotFound = 401,
     ConfigNotFound = 402,
     RoundNotFound = 403,
+    RoundStatsNotFound = 404,
+    WinnerNotFound = 405,
 
-    /// The contract failed to transfer XLM to the guesser
-    FailedToTransferToGuesser = 6,
-    /// The guesser failed to transfer XLM to the contract
-    FailedToTransferFromGuesser = 2,
-    /// The contract has no balance to transfer to the guesser
-    NoBalanceToTransfer = 3,
-    
+    // State Errors
+    RoundNotOpen = 500,
+    InvalidState = 501,
+    TargetNotMet = 502,
+
+    // Prize/Winner Errors
+    AlreadyClaimed = 600,
+    NotWinner = 601,
+    InsufficientTickets = 602,
+
+    // VRF Errors
+    UnauthorizedVRF = 700,
+    VRFRequestFailed = 701,
+
+    // Transfer Errors
+    FailedToTransferToWinner = 800,
+    FailedToTransferFromUser = 801,
+    NoBalanceToTransfer = 802,
 }

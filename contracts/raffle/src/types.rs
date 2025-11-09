@@ -1,10 +1,11 @@
-use soroban_sdk::{Address, contracttype};
+use soroban_sdk::{Address, Vec, contracttype};
 
 #[contracttype]
 #[derive(Clone, Debug, PartialEq)]
 pub enum State {
-    OPEN,
-    CLOSED
+    OPEN,      // Accepting ticket purchases
+    DRAWING,   // VRF requested, waiting for callback
+    COMPLETED  // Winner selected and round finished
 }
 
 #[contracttype]
@@ -21,7 +22,30 @@ pub struct Config {
 pub struct Round {
     pub round: u32,
     pub state: State,
-    pub picking_winner: bool,
+    pub vrf_request_id: Option<u64>,  // VRF request tracking
+}
+
+#[contracttype]
+#[derive(Clone, Debug, PartialEq)]
+pub struct RoundStats {
+    pub total_tickets: u32,
+    pub total_participants: u32,
+    pub prize_pool: i128,
+}
+
+#[contracttype]
+#[derive(Clone, Debug, PartialEq)]
+pub struct WinnerRecord {
+    pub winner: Address,
+    pub round: u32,
+    pub amount: i128,
+    pub claimed: bool,
+}
+
+#[contracttype]
+#[derive(Clone, Debug, PartialEq)]
+pub struct ParticipantBucket {
+    pub participants: Vec<Address>,
 }
 
 #[contracttype]
@@ -30,5 +54,11 @@ pub enum Storage {
     Admin,
     Config,
     TotalRounds,
-    Round(u32)
+    CurrentRound,                    // Current active round number
+    Round(u32),                      // Round data by round number
+    RoundStats(u32),                 // Stats for each round
+    UserTickets(u32, Address),       // (round, user) -> ticket count
+    ParticipantBucket(u32, u32),     // (round, bucket_idx) -> ParticipantBucket
+    WinnerRecord(u32),               // round -> WinnerRecord
+    UserWinningRounds(Address),      // user -> Vec<u32> of winning rounds
 }
