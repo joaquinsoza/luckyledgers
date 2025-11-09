@@ -20,7 +20,7 @@ impl LuckyLedgersRaffle {
         vrf_contract: Address,       // MockVRF address
         underlying_token: Address,   // Underlying Token address
         ticket_price: i128,          // e.g., 5_000_000 = 0.5 XLM
-        target_participants: u32     // e.g., 10 players triggers draw
+        target_participants: u32     // e.g., 10 players triggers draw // TODO: Should i do target_participants or target_tickets? what about a ticket cap per participant? what if a buys deposits 1000 tickets right at then end? is way more probable for him to take everything
     ) {
         // Set the admin in storage
         storage::set_admin(env, &admin);
