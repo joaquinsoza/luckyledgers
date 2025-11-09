@@ -74,6 +74,8 @@ impl LuckyLedgersRaffle {
         // If new participant, add to participant bucket
         if is_new_participant {
             storage::add_participant(&env, round_num, &caller);
+            // Re-fetch stats after add_participant updates it
+            stats = storage::get_round_stats(&env, round_num)?;
         }
 
         // Update round stats
@@ -223,19 +225,31 @@ impl LuckyLedgersRaffle {
 
         let winning_rounds = storage::get_user_winning_rounds(&env, &claimer);
         let mut total_claimed: i128 = 0;
+        let config = storage::get_config(&env)?;
+        let token_client = Self::token_client(&env, config.underlying_token);
 
         for round in winning_rounds.iter() {
             let winner_record = storage::get_winner_record(&env, round);
 
             if let Some(record) = winner_record {
-                if !record.claimed {
-                    // Claim this prize (re-use claim logic)
-                    let amount = Self::claim_prize(env.clone(), claimer.clone(), round)?;
-                    total_claimed = total_claimed.checked_add(amount).unwrap();
+                if !record.claimed && record.winner == claimer {
+                    let prize_amount = record.amount;
+
+                    // EFFECTS: Update state BEFORE external calls (CEI pattern)
+                    storage::update_winner_claimed(&env, round)?;
+
+                    // INTERACTIONS: Transfer tokens (external call LAST)
+                    token_client.transfer(&env.current_contract_address(), &claimer, &prize_amount);
+
+                    // Emit event
+                    events::emit_prize_claimed(&env, round, &claimer, prize_amount);
+
+                    total_claimed = total_claimed.checked_add(prize_amount).unwrap();
                 }
             }
         }
 
+        storage::extend_instance_ttl(&env);
         Ok(total_claimed)
     }
 
@@ -364,4 +378,5 @@ impl LuckyLedgersRaffle {
     }
 }
 
-// mod test;
+mod test;
+mod integration_test;

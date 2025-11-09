@@ -55,14 +55,15 @@ pub fn get_config(env: &Env) -> Result<Config, Error> {
 // Round
 pub fn create_new_round(env: &Env) {
     let total_rounds = get_total_rounds(env);
+    let new_round_num = total_rounds.checked_add(1).unwrap();
 
     let round: Round = Round {
-        round: total_rounds,
+        round: new_round_num,
         state: State::OPEN,
         vrf_request_id: None,
     };
 
-    let key = Storage::Round(total_rounds);
+    let key = Storage::Round(new_round_num);
     env.storage().persistent().set(&key, &round);
     env.storage()
         .persistent()
@@ -74,14 +75,14 @@ pub fn create_new_round(env: &Env) {
         total_participants: 0,
         prize_pool: 0,
     };
-    let stats_key = Storage::RoundStats(total_rounds);
+    let stats_key = Storage::RoundStats(new_round_num);
     env.storage().persistent().set(&stats_key, &stats);
     env.storage()
         .persistent()
         .extend_ttl(&stats_key, PERSISTENT_LIFETIME_THRESHOLD, PERSISTENT_BUMP_AMOUNT);
 
-    set_total_rounds(env, total_rounds.checked_add(1).unwrap());
-    set_current_round(env, total_rounds);
+    set_total_rounds(env, new_round_num);
+    set_current_round(env, new_round_num);
 }
 
 // Rounds
