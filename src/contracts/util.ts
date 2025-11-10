@@ -13,6 +13,7 @@ const envSchema = z.object({
   PUBLIC_STELLAR_NETWORK_PASSPHRASE: z.nativeEnum(WalletNetwork),
   PUBLIC_STELLAR_RPC_URL: z.string(),
   PUBLIC_STELLAR_HORIZON_URL: z.string(),
+  PUBLIC_TESTNET_WALLET: z.string(),
 });
 
 const parsed = envSchema.safeParse(import.meta.env);
@@ -24,6 +25,8 @@ const env: z.infer<typeof envSchema> = parsed.success
       PUBLIC_STELLAR_NETWORK_PASSPHRASE: WalletNetwork.STANDALONE,
       PUBLIC_STELLAR_RPC_URL: "http://localhost:8000/rpc",
       PUBLIC_STELLAR_HORIZON_URL: "http://localhost:8000",
+      PUBLIC_TESTNET_WALLET:
+        "SA7QNQYPR4NPAZAAIJ5QQNHO7DMDP2VTRAVDXPLGK76B2WY4YKFGPDSK",
     };
 
 export const stellarNetwork =
@@ -53,6 +56,7 @@ export const labPrefix = () => {
 
 // NOTE: needs to be exported for contract files in this directory
 export const rpcUrl = env.PUBLIC_STELLAR_RPC_URL;
+export const defaultWallet = env.PUBLIC_TESTNET_WALLET;
 
 export const horizonUrl = env.PUBLIC_STELLAR_HORIZON_URL;
 
