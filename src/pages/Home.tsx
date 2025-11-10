@@ -5,6 +5,8 @@ import { RaffleStats } from "../components/RaffleStats";
 // import { WinnerClaim } from "../components/WinnerClaim";
 import { DrawButton } from "../components/DrawButton";
 import { Box } from "../components/layout/Box";
+import { WinnerClaim } from "../components/WinnerClaim";
+import { PreviousWinner } from "../components/PreviousWinner";
 
 const Home: React.FC = () => (
   <Layout.Content>
@@ -19,9 +21,10 @@ const Home: React.FC = () => (
             contracts with verifiable random number generation.
           </Text>
         </Box>
+        <PreviousWinner />
 
         {/* Winner Claim - Shows only if user has unclaimed prizes */}
-        {/* <WinnerClaim /> */}
+        <WinnerClaim />
 
         {/* Draw Button - Shows only when ready */}
         <DrawButton />
