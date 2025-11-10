@@ -35,6 +35,9 @@ lerna-debug.log*
 # macOS-specific files
 .DS_Store
 
+# Bot wallet storage (contains secret keys)
+scripts/.wallets.json
+
 !packages/raffle/dist
 !packages/vrf/dist
 plan

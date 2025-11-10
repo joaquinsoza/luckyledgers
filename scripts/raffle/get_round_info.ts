@@ -1,3 +1,5 @@
+/* eslint-disable @typescript-eslint/no-unsafe-assignment */
+/* eslint-disable @typescript-eslint/no-unsafe-member-access */
 import {
   Contract,
   nativeToScVal,
@@ -29,7 +31,14 @@ export async function getRoundInfo(roundNumber: number): Promise<RoundInfo> {
     ...args,
   );
 
-  const roundInfo = scValToNative(result) as RoundInfo;
+  const parsed = scValToNative(result);
+
+  // Stellar SDK returns enum variants as arrays, extract the string value
+  const roundInfo: RoundInfo = {
+    round: parsed.round,
+    state: Array.isArray(parsed.state) ? parsed.state[0] : parsed.state,
+    vrf_request_id: parsed.vrf_request_id,
+  };
 
   console.log(`✓ Round Info:`, roundInfo);
 
